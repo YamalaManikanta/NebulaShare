@@ -1,0 +1,852 @@
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\controller\AdminController.java
+package com.example.nebulashare.controller;
+
+import com.example.nebulashare.model.FileData;
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.service.AdminService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/admin")
+public class AdminController {
+
+    @Autowired
+    private AdminService adminService;
+
+    @GetMapping("/users")
+    public ResponseEntity<List<User>> getAllUsers() {
+        List<User> users = adminService.findAllUsers();
+        return ResponseEntity.ok(users);
+    }
+
+    @DeleteMapping("/users/{userId}")
+    public ResponseEntity<?> deleteUser(@PathVariable String userId) {
+        try {
+            adminService.deleteUserById(userId);
+            return ResponseEntity.ok(Map.of("message", "User deleted successfully."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+    
+    @GetMapping("/files")
+    public ResponseEntity<List<FileData>> getAllFiles() {
+        List<FileData> files = adminService.findAllFiles();
+        return ResponseEntity.ok(files);
+    }
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\controller\AuthController.java
+package com.example.nebulashare.controller;
+
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.service.JwtService;
+import com.example.nebulashare.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    
+    @Autowired
+    private JwtService jwtService;
+
+
+    @PostMapping("/signup")
+    public ResponseEntity<?> signup(@RequestBody Map<String, String> payload) {
+        try {
+            User user = new User();
+            user.setUsername(payload.get("username"));
+            user.setEmail(payload.get("email"));
+            user.setPassword(payload.get("password"));
+            userService.registerUser(user);
+            return ResponseEntity.ok(Map.of("message", "User registered successfully. Please check your email for OTP."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/verify-otp")
+    public ResponseEntity<?> verifyOtp(@RequestBody Map<String, String> payload) {
+        try {
+            userService.verifyOtp(payload.get("email"), payload.get("otp"));
+            return ResponseEntity.ok(Map.of("message", "OTP verified successfully."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody Map<String, String> payload) {
+        try {
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(payload.get("email"), payload.get("password"))
+            );
+            
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            User user = userService.findByEmail(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+            
+            if (!user.isVerified()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Please verify your email first."));
+            }
+
+            final String jwt = jwtService.generateToken(userDetails);
+
+            return ResponseEntity.ok(Map.of("token", jwt, "user", user));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid credentials."));
+        }
+    }
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\controller\Filecontroller.java
+
+package com.example.nebulashare.controller;
+
+import com.example.nebulashare.model.FileData;
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.service.FileStorageService;
+import com.example.nebulashare.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+@RestController
+@RequestMapping("/api/files")
+public class FileController {
+
+    @Autowired
+    private FileStorageService fileStorageService;
+
+    @Autowired
+    private UserService userService;
+
+    @PostMapping("/upload")
+    public ResponseEntity<?> uploadFile(@RequestParam("file") MultipartFile file, @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            User user = userService.findByEmail(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+            FileData fileData = fileStorageService.storeFile(file, user);
+            return ResponseEntity.ok(fileData);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Could not upload the file: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/user")
+    public ResponseEntity<List<FileData>> getUserFiles(@AuthenticationPrincipal UserDetails userDetails) {
+        User user = userService.findByEmail(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+        List<FileData> files = fileStorageService.getFilesByUser(user);
+        return ResponseEntity.ok(files);
+    }
+
+    @GetMapping("/download/{fileId}")
+    public ResponseEntity<Resource> downloadFile(@PathVariable String fileId) {
+        try {
+            Optional<FileData> fileDataOptional = fileStorageService.getFile(fileId);
+            if (fileDataOptional.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            FileData fileData = fileDataOptional.get();
+            Resource resource = fileStorageService.loadFileAsResource(fileData.getStoragePath());
+            
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(fileData.getFileType()))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileData.getFileName() + "\"")
+                    .body(resource);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping("/share/{fileId}")
+    public ResponseEntity<?> createShareableLink(@PathVariable String fileId, @RequestBody Map<String, String> payload) {
+        // A full implementation would create a separate ShareLink entity in the database.
+        // For simplicity, this example returns a direct download link. The type ('PERMANENT', 'ONE_TIME')
+        // from the payload could be used to set an expiry or a one-time-use flag.
+        try {
+            String link = fileStorageService.createShareableLink(fileId, payload.get("type"));
+            return ResponseEntity.ok(Map.of("link", link));
+        } catch (Exception e) {
+             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+    
+    @DeleteMapping("/{fileId}")
+    public ResponseEntity<?> deleteFile(@PathVariable String fileId, @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            User user = userService.findByEmail(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+            fileStorageService.deleteFile(fileId, user);
+            return ResponseEntity.ok(Map.of("message", "File deleted successfully."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+}
+
+package com.example.nebulashare.controller;
+
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/user")
+public class UserController {
+
+    @Autowired
+    private UserService userService;
+
+    @GetMapping("/profile")
+    public ResponseEntity<?> getProfile(@AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            User user = userService.findByEmail(userDetails.getUsername())
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/profile")
+    public ResponseEntity<?> updateProfile(@RequestBody Map<String, String> payload, @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            User updatedUser = userService.updateUserProfile(
+                userDetails.getUsername(),
+                payload.get("username"),
+                payload.get("email")
+            );
+            // Note: If the email changes, you might need to re-verify it and issue a new JWT.
+            return ResponseEntity.ok(Map.of("message", "Profile updated successfully!", "user", updatedUser));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+    
+    @PutMapping("/change-password")
+    public ResponseEntity<?> changePassword(@RequestBody Map<String, String> payload, @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            userService.changeUserPassword(
+                userDetails.getUsername(),
+                payload.get("currentPassword"),
+                payload.get("newPassword")
+            );
+            return ResponseEntity.ok(Map.of("message", "Password changed successfully."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\exception\FileStorageException.java
+package com.example.nebulashare.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+@ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+public class FileStorageException extends RuntimeException {
+
+    /**
+     * Constructor for FileStorageException with a message.
+     * @param message The detail message.
+     */
+    public FileStorageException(String message) {
+        super(message);
+    }
+
+    /**
+     * Constructor for FileStorageException with a message and a cause.
+     * @param message The detail message.
+     * @param cause The cause of the exception.
+     */
+    public FileStorageException(String message, Throwable cause) {
+        super(message, cause);
+    }
+}
+
+
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\model\FileData.java
+package com.example.nebulashare.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "files")
+@Data // Lombok annotation to generate getters, setters, toString, etc.
+public class FileData {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+
+    @Column(nullable = false)
+    private String fileName;
+
+    @Column(nullable = false)
+    private String fileType;
+
+    @Column(nullable = false)
+    private long fileSize;
+
+    @Lob // Large Object, suitable for storing large strings like a URL or path
+    @Column(nullable = false, length = 1024)
+    private String filePath; // Path to the file in storage (e.g., local disk or S3 bucket key)
+
+    @ManyToOne(fetch = FetchType.LAZY) // Many files can belong to one user
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @CreationTimestamp // Automatically set the creation timestamp
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
+    // Optional: Fields for shareable link functionality
+    private String shareableLink;
+
+    @Enumerated(EnumType.STRING)
+    private LinkType linkType; // e.g., PERMANENT, ONE_TIME
+
+    private LocalDateTime linkExpiresAt;
+
+    public enum LinkType {
+        PERMANENT,
+        ONE_TIME
+    }
+
+    public String getStoragePath() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getStoragePath'");
+    }
+}
+
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\model\User.java
+package com.example.nebulashare.model;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.persistence.*;
+import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDateTime;
+
+@Data // Lombok annotation to generate getters, setters, toString, etc.
+@Entity
+@Table(name = "users")
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(unique = true, nullable = false)
+    private String username;
+
+    @Column(unique = true, nullable = false)
+    private String email;
+
+    @JsonIgnore // Prevents the password from being sent in API responses
+    @Column(nullable = false)
+    private String password;
+
+    @Column(nullable = false)
+    private String role; // e.g., "USER", "ADMIN"
+
+    @JsonIgnore // Hide OTP from API responses for security
+    private String otp;
+
+    @JsonIgnore // Hide OTP expiry from API responses
+    private LocalDateTime otpExpiry;
+
+    @Column(name = "is_verified", nullable = false)
+    private boolean isVerified = false;
+
+    @CreationTimestamp // Automatically set the creation timestamp
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp // Automatically set the update timestamp on every change
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\repository\FileDataRepository.java
+package com.example.nebulashare.repository;
+
+import com.example.nebulashare.model.FileData;
+import com.example.nebulashare.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface FileDataRepository extends JpaRepository<FileData, String> {
+
+    /**
+     * Finds all files belonging to a specific user.
+     * Spring Data JPA creates the query automatically from the method name.
+     *
+     * @param user The user entity to search files for.
+     * @return A list of FileData objects owned by the user.
+     */
+    List<FileData> findByUser(User user);
+
+    /**
+     * Finds a file by its ID and the user who owns it.
+     * This is useful for ensuring a user can only access their own files.
+     *
+     * @param id The ID of the file.
+     * @param user The owner of the file.
+     * @return An Optional containing the file if found and owned by the user.
+     */
+    Optional<FileData> findByIdAndUser(String id, User user);
+}
+
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\repository\UserRepository.java
+package com.example.nebulashare.repository;
+
+import com.example.nebulashare.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+
+    // Spring Data JPA automatically generates the implementation for these methods
+    // based on their names. Using Optional is a best practice to avoid NullPointerExceptions.
+
+    /**
+     * Finds a user by their email address.
+     * @param email The email to search for.
+     * @return An Optional containing the user if found, or an empty Optional otherwise.
+     */
+    Optional<User> findByEmail(String email);
+
+    /**
+     * Finds a user by their username.
+     * @param username The username to search for.
+     * @return An Optional containing the user if found, or an empty Optional otherwise.
+     */
+    Optional<User> findByUsername(String username);
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\service\AdminService.java
+package com.example.nebulashare.service;
+
+import com.example.nebulashare.model.FileData;
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.repository.FileDataRepository;
+import com.example.nebulashare.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+public class AdminService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private FileDataRepository fileDataRepository;
+
+    public List<User> findAllUsers() {
+        return userRepository.findAll();
+    }
+
+    public void deleteUserById(String userId) {
+        deleteUser(Long.parseLong(userId));
+    }
+
+    public List<FileData> findAllFiles() {
+        return fileDataRepository.findAll();
+    }
+
+    // Existing method for deleting user with security check
+    public void deleteUser(Long userId) {
+        UserDetails userDetails = (UserDetails) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        User currentUser = userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("Authenticated user not found."));
+
+        if (currentUser.getId().equals(userId)) {
+            throw new RuntimeException("Admins cannot delete their own account.");
+        }
+
+        if (!userRepository.existsById(userId)) {
+            throw new RuntimeException("User not found with id: " + userId);
+        }
+
+        userRepository.deleteById(userId);
+    }
+}
+
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\service\CustomUserDetailsService.java
+package com.example.nebulashare.service;
+
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+import java.util.Collections;
+
+@Service
+public class CustomUserDetailsService implements UserDetailsService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + email));
+
+        return new org.springframework.security.core.userdetails.User(
+            user.getEmail(), 
+            user.getPassword(), 
+            Collections.singleton(new SimpleGrantedAuthority(user.getRole()))
+        );
+    }
+}
+
+
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\service\EmailService.java
+
+package com.example.nebulashare.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.stereotype.Service;
+
+@Service
+public class EmailService {
+
+    @Autowired
+    private JavaMailSender mailSender;
+
+    /**
+     * Sends an OTP email to the specified recipient.
+     * @param to The recipient's email address.
+     * @param otp The One-Time Password to send.
+     */
+    public void sendOtpEmail(String to, String otp) {
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            // IMPORTANT: This 'from' address must be a verified sender
+            // in your email service provider (e.g., Brevo).
+            message.setFrom("manikantayamala00@gmail.com");
+            message.setTo(to);
+            message.setSubject("Your NebulaShare Verification Code");
+            message.setText("Welcome to NebulaShare! \n\nYour OTP code is: " + otp + "\n\nThis code will expire in 10 minutes.");
+            
+            mailSender.send(message);
+        } catch (Exception e) {
+            // In a production environment, you should handle this exception more gracefully.
+            // For example, log the error and perhaps queue the email for a retry.
+            throw new RuntimeException("Failed to send OTP email: " + e.getMessage());
+        }
+    }
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\service\FileStorageService.java
+package com.example.nebulashare.service;
+
+import com.example.nebulashare.exception.FileStorageException;
+import com.example.nebulashare.model.FileData;
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.repository.FileDataRepository;
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.nio.file.*;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class FileStorageService {
+
+    private final Path fileStorageLocation;
+    private final FileDataRepository fileDataRepository;
+
+    @Autowired
+    public FileStorageService(@Value("${file.upload-dir}") String uploadDir, FileDataRepository fileDataRepository) {
+        this.fileStorageLocation = Paths.get(uploadDir).toAbsolutePath().normalize();
+        this.fileDataRepository = fileDataRepository;
+    }
+
+    @PostConstruct
+    public void init() {
+        try {
+            Files.createDirectories(this.fileStorageLocation);
+        } catch (Exception ex) {
+            throw new FileStorageException("Could not create upload directory.", ex);
+        }
+    }
+
+    public FileData storeFile(MultipartFile file, User user) {
+        String originalFileName = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
+
+        try {
+            if (originalFileName.contains("..")) {
+                throw new FileStorageException("Invalid path sequence in filename " + originalFileName);
+            }
+
+            String fileExtension = "";
+            int dotIndex = originalFileName.lastIndexOf('.');
+            if (dotIndex > 0) {
+                fileExtension = originalFileName.substring(dotIndex);
+            }
+
+            String storedFileName = UUID.randomUUID() + fileExtension;
+            Path targetLocation = this.fileStorageLocation.resolve(storedFileName);
+            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+
+            FileData fileData = new FileData();
+            fileData.setFileName(originalFileName);
+            fileData.setFileType(file.getContentType());
+            fileData.setFileSize(file.getSize());
+            fileData.setFilePath(targetLocation.toString());
+            fileData.setUser(user);
+
+            return fileDataRepository.save(fileData);
+
+        } catch (IOException ex) {
+            throw new FileStorageException("Could not store file " + originalFileName, ex);
+        }
+    }
+
+    public List<FileData> getFilesByUser(User user) {
+        return fileDataRepository.findByUser(user);
+    }
+
+    public Optional<FileData> getFile(String fileId) {
+        return fileDataRepository.findById(fileId);
+    }
+
+    public String createShareableLink(String fileId, String userId) {
+        // Example shareable link
+        return "http://localhost:8080/share/" + fileId;
+    }
+
+    public Resource loadFileAsResource(String fileId, User user) {
+        FileData fileData = fileDataRepository.findByIdAndUser(fileId, user)
+                .orElseThrow(() -> new FileStorageException("File not found: " + fileId));
+
+        try {
+            Path filePath = Paths.get(fileData.getFilePath());
+            Resource resource = new UrlResource(filePath.toUri());
+            if (resource.exists()) return resource;
+            else throw new FileStorageException("File not found: " + fileData.getFileName());
+        } catch (MalformedURLException e) {
+            throw new FileStorageException("File not found: " + fileData.getFileName(), e);
+        }
+    }
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\service\JwtService.java
+package com.example.nebulashare.service;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Service;
+
+import java.security.Key;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
+
+@Service
+public class JwtService {
+
+    @Value("${jwt.secret}")
+    private String secret;
+
+    private Key getSigningKey() {
+        byte[] keyBytes = secret.getBytes();
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    public String extractUsername(String token) {
+        return extractClaim(token, Claims::getSubject);
+    }
+
+    public Date extractExpiration(String token) {
+        return extractClaim(token, Claims::getExpiration);
+    }
+
+    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
+        final Claims claims = extractAllClaims(token);
+        return claimsResolver.apply(claims);
+    }
+
+    private Claims extractAllClaims(String token) {
+        return Jwts.parserBuilder().setSigningKey(getSigningKey()).build().parseClaimsJws(token).getBody();
+    }
+
+    private Boolean isTokenExpired(String token) {
+        return extractExpiration(token).before(new Date());
+    }
+
+    public String generateToken(UserDetails userDetails) {
+        Map<String, Object> claims = new HashMap<>();
+        return createToken(claims, userDetails.getUsername());
+    }
+
+    private String createToken(Map<String, Object> claims, String subject) {
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(subject)
+                .setIssuedAt(new Date(System.currentTimeMillis()))
+                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10)) // 10 hours
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public Boolean validateToken(String token, UserDetails userDetails) {
+        final String username = extractUsername(token);
+        return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+    }
+}
+D:\NebulaShare\backend\src\main\java\com\example\nebulashare\service\UserService.java
+package com.example.nebulashare.service;
+
+import com.example.nebulashare.model.User;
+import com.example.nebulashare.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.Random;
+
+@Service
+public class UserService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private EmailService emailService;
+
+    public User registerUser(User user) {
+        if (userRepository.findByEmail(user.getEmail()).isPresent()) throw new RuntimeException("Email in use");
+        if (userRepository.findByUsername(user.getUsername()).isPresent()) throw new RuntimeException("Username taken");
+
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        user.setRole("USER");
+        user.setVerified(false);
+
+        String otp = generateOtp();
+        user.setOtp(otp);
+        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
+        emailService.sendOtpEmail(user.getEmail(), otp);
+
+        return userRepository.save(user);
+    }
+
+    public void verifyOtp(String email, String otp) {
+        User user = userRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (!user.getOtp().equals(otp)) throw new RuntimeException("Invalid OTP");
+        if (user.getOtpExpiry().isBefore(LocalDateTime.now())) throw new RuntimeException("OTP expired");
+
+        user.setVerified(true);
+        user.setOtp(null);
+        user.setOtpExpiry(null);
+        userRepository.save(user);
+    }
+
+    private String generateOtp() {
+        return String.format("%06d", new Random().nextInt(999999));
+    }
+
+    public User updateUserProfile(String username, String newUsername, String newEmail) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setUsername(newUsername);
+        user.setEmail(newEmail);
+        return userRepository.save(user);
+    }
+
+    public void changeUserPassword(String username, String oldPassword, String newPassword) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+            throw new RuntimeException("Old password is incorrect");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+    }
+
+    public Optional<User> findByEmail(String email) {
+        return userRepository.findByEmail(email);
+    }
+}
+
+
