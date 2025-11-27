@@ -34,17 +34,7 @@ public class AuthController {
             user.setEmail(payload.get("email"));
             user.setPassword(payload.get("password"));
             userService.registerUser(user);
-            return ResponseEntity.ok(Map.of("message", "User registered successfully. Please check your email for OTP."));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-        }
-    }
-
-    @PostMapping("/verify-otp")
-    public ResponseEntity<?> verifyOtp(@RequestBody Map<String, String> payload) {
-        try {
-            userService.verifyOtp(payload.get("email"), payload.get("otp"));
-            return ResponseEntity.ok(Map.of("message", "OTP verified successfully."));
+            return ResponseEntity.ok(Map.of("message", "User registered successfully"));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
@@ -61,10 +51,6 @@ public class AuthController {
             User user = userService.findByEmail(userDetails.getUsername())
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            if (!user.isVerified()) {
-                return ResponseEntity.badRequest().body(Map.of("message", "Please verify your email first."));
-            }
-
             String jwt = jwtService.generateToken(userDetails);
 
             return ResponseEntity.ok(Map.of(
@@ -73,7 +59,7 @@ public class AuthController {
             ));
 
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Invalid credentials."));
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid credentials"));
         }
     }
 }
