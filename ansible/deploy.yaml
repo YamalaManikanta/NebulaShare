@@ -1,0 +1,22 @@
+---
+- name: Deploy NebulaShare to Minikube
+  hosts: local
+  tasks:
+
+    - name: Apply MySQL Deployment
+      command: kubectl apply -f kubernetes/mysql.yaml
+      args:
+        chdir: "{{ playbook_dir }}/.."
+
+    - name: Apply Backend Deployment
+      command: kubectl apply -f kubernetes/backend.yaml
+      args:
+        chdir: "{{ playbook_dir }}/.."
+
+    - name: Apply Frontend Deployment
+      command: kubectl apply -f kubernetes/frontend.yaml
+      args:
+        chdir: "{{ playbook_dir }}/.."
+
+    - name: Wait for all pods to be ready
+      command: kubectl wait --for=condition=Ready pods --all --timeout=60s

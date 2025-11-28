@@ -1,39 +1,41 @@
-version: "3.8"
-
 services:
-  mysql:
+
+  nebulashare-mysql:
     image: mysql:8.0
-    restart: always
     container_name: nebulashare-mysql
+    restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: nebuladb
+      MYSQL_ROOT_PASSWORD: yamala
+      MYSQL_DATABASE: nebula_share
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
 
-  backend:
+  nebulashare-backend:
     image: manikantayamala/nebulashare-backend:v1
     container_name: nebulashare-backend
     restart: always
     depends_on:
-      - mysql
+      - nebulashare-mysql
     ports:
       - "8082:8082"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/nebuladb?allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_URL: jdbc:mysql://nebulashare-mysql:3306/nebula_share?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: yamala
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.MySQLDialect
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: com.mysql.cj.jdbc.Driver
 
-  frontend:
+  nebulashare-frontend:
     image: manikantayamala/nebulashare-frontend:v1
     container_name: nebulashare-frontend
     restart: always
+    depends_on:
+      - nebulashare-backend
     ports:
       - "3000:80"
-    depends_on:
-      - backend
 
 volumes:
   mysql_data:

@@ -28,16 +28,7 @@ public class User {
     private String password;
 
     @Column(nullable = false)
-    private String role;
-
-    @JsonIgnore
-    private String otp;
-
-    @JsonIgnore
-    private LocalDateTime otpExpiry;
-
-    @Column(name = "is_verified", nullable = false)
-    private boolean isVerified = false;
+    private String role = "USER";
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

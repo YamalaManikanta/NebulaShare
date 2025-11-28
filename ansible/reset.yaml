@@ -1,0 +1,7 @@
+---
+- name: Clean NebulaShare Deployment
+  hosts: local
+  tasks:
+
+    - name: Delete all NebulaShare Kubernetes resources
+      command: kubectl delete -f kubernetes --ignore-not-found

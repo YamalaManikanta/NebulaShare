@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nebulashare-backend
+spec:
+  selector:
+    matchLabels:
+      app: nebulashare-backend
+  template:
+    metadata:
+      labels:
+        app: nebulashare-backend
+    spec:
+      containers:
+        - name: nebulashare-backend
+          image: manikantayamala/nebulashare-backend:v1
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://nebulashare-mysql:3306/nebula_share?allowPublicKeyRetrieval=true&useSSL=false&createDatabaseIfNotExist=true
+            - name: SPRING_DATASOURCE_USERNAME
+              value: root
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: yamala
+          ports:
+            - containerPort: 8082
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nebulashare-backend
+spec:
+  selector:
+    app: nebulashare-backend
+  ports:
+    - port: 8082
+      targetPort: 8082
+  type: ClusterIP   # 🔥 Correct type
